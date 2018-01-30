@@ -43,10 +43,6 @@ def plot_hull_2d(hull, ax):
     
     return ax
 
-def plot_delaunay(faces, points, ax):
-    ax.triplot(points[:,0], points[:,1], faces)
-    ax.plot(points[:,0], points[:,1], 'o')
-    
 def plot_hull_3d(hull, fig, upper = False):
     points = hull.points
     ax = fig.add_subplot(111, projection='3d')
@@ -72,7 +68,13 @@ def plot_hull_3d(hull, fig, upper = False):
     ax.set_zlim3d(_min[2], _max[2])
     
     return ax
-    
+
+def plot_delaunay(faces, points, ax):
+    ax.triplot(points[:,0], points[:,1], faces)
+    for cnt, _face in enumerate(faces):
+        heart = np.mean(points[_face], axis = 0)
+        ax.text(heart[0], heart[1], str(cnt))
+        
 def d2to3(d2_arr, d1_arr = None):
     if d1_arr is None:
         d1_arr = np.zeros((d2_arr.shape[0], 1), d2_arr.dtype)
@@ -148,58 +150,76 @@ def compute_cell(_face, pos, faces, edges_dic, cell):
     return flag_bd
 
 def power_diagram_2d(points, h = None):
+    fig2d = plt.figure(figsize = (12 * 4, 11 * 4))
+    ax2d = fig2d.add_subplot(111)
     npoints = points.shape[0]
     if h is None:
         h = np.zeros((points.shape[0], 1), np.float32)
-    pl = np.concatenate((points, np.sum(points * points, axis=1, keepdims=True) - h), axis = 1)
+    tp = np.sum(points * points, axis=1, keepdims=True)
+    pl = np.concatenate((points, tp - h), axis = 1)
     hull = convexhull(pl)
     ind = hull.equations[:, 2] < 0
     nfaces = np.sum(ind)
     faces = hull.simplices[ind]
     dps = np.zeros((nfaces, 2), np.float32)
-    dic = dict()
-    for _face, cnt in zip(faces, xrange(nfaces)):
+    dict_id_edge = dict()  # build a map dict in wich the key is edge and the value is the id of faces
+    for cnt, _face in enumerate(faces):
         dps[cnt] = face_dual_uv(pl[_face])
         left, right = _cmp(_face[0], _face[1])
-        _dict_update(dic, '%d_%d'%(left, right), cnt)
+        _dict_update(dict_id_edge, '%d_%d'%(left, right), cnt)
         left, right = _cmp(_face[0], _face[2])
-        _dict_update(dic, '%d_%d'%(left, right), cnt)
+        _dict_update(dict_id_edge, '%d_%d'%(left, right), cnt)
         left, right = _cmp(_face[2], _face[1])
-        _dict_update(dic, '%d_%d'%(left, right), cnt)
+        _dict_update(dict_id_edge, '%d_%d'%(left, right), cnt)
 
     cells_dic = dict()
     flag_bd = np.zeros((npoints), np.int32)
-    for _face, cnt in zip(faces, xrange(nfaces)):
+    plot_delaunay(faces, points, ax2d)
+    for cnt, _face in enumerate(faces):
         for pos in range(3):
             if _face[pos] in cells_dic:
                 continue
             cell = [cnt]
-            flag_bd[_face[pos]] = compute_cell(_face, pos, faces, dic, cell)
+            flag_bd[_face[pos]] = compute_cell(_face, pos, faces, dict_id_edge, cell)
             cells_dic.update({_face[pos]: cell})
 
+    # construct a boundry
     dps_bd = np.zeros((np.sum(flag_bd), 2), np.float32)
     minxy = np.min(dps, axis = 0) - 1.0
     maxxy = np.max(dps, axis = 0) + 1.0
     scale = np.sqrt(np.sum((maxxy - minxy)**2))
-    points_bd = np.array([[minxy[0], minxy[0]], [minxy[0], maxxy[1]], [maxxy[0], maxxy[1]], [maxxy[0], minxy[1]], [minxy[0], minxy[0]]])
+    points_bd = np.array([[minxy[0], minxy[1]], [minxy[0], maxxy[1]], [maxxy[0], maxxy[1]], [maxxy[0], minxy[1]], [minxy[0], minxy[1]]])
     polygon_bd = polygon(points_bd)
     
     cnt = 0
-    for ii in xrange(npoints):
+    for ii in range(npoints):
         if flag_bd[ii]:
             flag_bd[ii] = nfaces + cnt
             cnt += 1
+
+    bd_hull = convexhull(points)
+    bd_edge = np.ones((npoints, 2), np.int32) * (-1)
+    for edge in bd_hull.simplices:
+        if bd_edge[edge[0]][0] == -1:
+            bd_edge[edge[0]][0] = edge[1]
+        else:
+            bd_edge[edge[0]][1] = edge[1]
+        if bd_edge[edge[1]][0] == -1:
+            bd_edge[edge[1]][0] = edge[0]
+        else:
+            bd_edge[edge[1]][1] = edge[0]
     cnt = 0
-    for ii in xrange(npoints):
-        if flag_bd[ii] == 0:
+    for ii in range(npoints):
+        if flag_bd[ii] == 0 or bd_edge[ii][0] == -1:
+            print(flag_bd[ii], bd_edge[ii])
             continue
         cell = cells_dic[ii]
-        for pp in faces[cell[0]]:
-            if pp != ii and flag_bd[pp]:
-                B_inx = pp
-        for pp in faces[cell[-1]]:
-            if pp != ii and flag_bd[pp]:
-                C_inx = pp
+        if np.sum(bd_edge[ii][0] == faces[cell[0]]):
+            B_inx = bd_edge[ii][0]
+            C_inx = bd_edge[ii][1]
+        else:
+            B_inx = bd_edge[ii][1]
+            C_inx = bd_edge[ii][0]
         if ccw(points[ii], points[B_inx], points[C_inx]):
             face_num = cell[0]
             other_inx = B_inx
@@ -211,10 +231,14 @@ def power_diagram_2d(points, h = None):
             cell.append(flag_bd[ii])
             cell.insert(0, flag_bd[B_inx])
         vec = points[ii] - points[other_inx]
+        vec /= np.sqrt(np.sum(vec**2))
+        print(ii, other_inx, B_inx, C_inx, face_num, vec)
         ray = np.array([dps[face_num, 0], dps[face_num, 1], -vec[1], vec[0]])
-        point_inter = intersect_ray_polygon(ray, polygon_bd, scale)
+        point_inter = intersect_ray_polygon(ray, polygon_bd, scale, ax2d)
         if point_inter == []:
-            print 'intersect_ray_polygon error!'
+            print('intersect_ray_polygon error!')
+            exit()
         dps_bd[cnt] = np.array(point_inter)
         cnt += 1
-    return dps, dps_bd, cells_dic, faces
+    plt.show()
+    return dps, dps_bd, cells_dic, faces, points_bd
