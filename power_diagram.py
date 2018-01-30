@@ -1,3 +1,4 @@
+# %load /home/simon/omt-gu/omt-py/optimal-transport/power_diagram.py
 import scipy as sci
 from scipy.spatial import ConvexHull as convexhull
 from scipy.spatial import Delaunay as delaunay
@@ -21,7 +22,7 @@ def intersect_ray_polygon(ray, poly, scale, thresh = 0.001):
     if npoints == 0:
         return []
     equal_thresh = 0.00001;
-    for ii in xrange(npoints):
+    for ii in range(npoints):
         if np.sum(np.abs(region[0][ii] - a) > equal_thresh):
             return region[0][ii]
     return []
@@ -31,7 +32,6 @@ def face_dual_uv(p):
     b = p[0, 2] * (p[1, 0] - p[2, 0]) + p[1, 2] * (p[2, 0] - p[0, 0]) + p[2, 2] * (p[0, 0] - p[1, 0])
     c = p[0, 0] * (p[1, 1] - p[2, 1]) + p[1, 0] * (p[2, 1] - p[0, 1]) + p[2, 0] * (p[0, 1] - p[1, 1])
     return np.array([-a/c/2, -b/c/2])
-
 
 def plot_hull_2d(hull, ax):
     points = hull.points
@@ -43,47 +43,11 @@ def plot_hull_2d(hull, ax):
     
     return ax
 
-def plot_hull_3d(hull, fig, upper = False):
-    points = hull.points
-    ax = fig.add_subplot(111, projection='3d')
-    edges= zip(*points)
-
-    cnt = -1
-    for i in hull.simplices:
-        cnt += 1
-        if upper and hull.equations[cnt, 2] > 0:
-            continue
-        ax.plot(points[i,0], points[i,1], points[i,2], 'r-')
-
-    ax.plot(edges[0],edges[1],edges[2],'bo') 
-
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    ax.set_zlabel('z')
-
-    _min = np.min(points, axis = 0) - 0.1
-    _max = np.max(points, axis = 0) + 0.1
-    ax.set_xlim3d(_min[0], _max[0])
-    ax.set_ylim3d(_min[1], _max[1])
-    ax.set_zlim3d(_min[2], _max[2])
-    
-    return ax
-
 def plot_delaunay(faces, points, ax):
     ax.triplot(points[:,0], points[:,1], faces)
     for cnt, _face in enumerate(faces):
         heart = np.mean(points[_face], axis = 0)
         ax.text(heart[0], heart[1], str(cnt))
-        
-def d2to3(d2_arr, d1_arr = None):
-    if d1_arr is None:
-        d1_arr = np.zeros((d2_arr.shape[0], 1), d2_arr.dtype)
-    return np.concatenate((d2_arr, d1_arr), axis = 1)
-
-def plot_pd(dpe, cells, ax):
-    for cell in cells:
-        pos = cell[0][0] - 1
-        ax.plot(dpe[pos, 0], dpe[pos, 1], 'r-')
 
 def _dict_update(dic, key, value):
         if key in dic:
@@ -101,7 +65,7 @@ ccw = lambda A, B, C: (B[0] - A[0]) * (C[1] - A[1]) > (B[1] - A[1]) * (C[0] - A[
 
 def compute_edge_next(_face, point_inx, edge_cur):
     #print 'next:', _face, point_inx, edge_cur
-    for ii in xrange(_face.size):
+    for ii in range(_face.size):
         if point_inx == _face[ii]:
             break
     #print ii
@@ -150,8 +114,6 @@ def compute_cell(_face, pos, faces, edges_dic, cell):
     return flag_bd
 
 def power_diagram_2d(points, h = None):
-    fig2d = plt.figure(figsize = (12 * 4, 11 * 4))
-    ax2d = fig2d.add_subplot(111)
     npoints = points.shape[0]
     if h is None:
         h = np.zeros((points.shape[0], 1), np.float32)
@@ -211,7 +173,7 @@ def power_diagram_2d(points, h = None):
     cnt = 0
     for ii in range(npoints):
         if flag_bd[ii] == 0 or bd_edge[ii][0] == -1:
-            print(flag_bd[ii], bd_edge[ii])
+            #print(flag_bd[ii], bd_edge[ii])
             continue
         cell = cells_dic[ii]
         if np.sum(bd_edge[ii][0] == faces[cell[0]]):
@@ -232,13 +194,63 @@ def power_diagram_2d(points, h = None):
             cell.insert(0, flag_bd[B_inx])
         vec = points[ii] - points[other_inx]
         vec /= np.sqrt(np.sum(vec**2))
-        print(ii, other_inx, B_inx, C_inx, face_num, vec)
+        #print(ii, other_inx, B_inx, C_inx, face_num, vec)
         ray = np.array([dps[face_num, 0], dps[face_num, 1], -vec[1], vec[0]])
-        point_inter = intersect_ray_polygon(ray, polygon_bd, scale, ax2d)
+        point_inter = intersect_ray_polygon(ray, polygon_bd, scale)
         if point_inter == []:
             print('intersect_ray_polygon error!')
             exit()
         dps_bd[cnt] = np.array(point_inter)
         cnt += 1
-    plt.show()
     return dps, dps_bd, cells_dic, faces, points_bd
+
+def verify(points, dps, cells_dic, h = None, thresh = 0.0001):
+    dist2 = lambda x, y: np.sum((x - y)**2)
+    dict_edge_cell = dict()
+    npoints = points.shape[0]
+    for ncell in range(npoints):
+        if ncell in cells_dic:
+            cell = cells_dic[ncell]
+            for idx in range(len(cell) - 1):
+                left, right = _cmp(cell[idx], cell[idx+1])
+                _dict_update(dict_edge_cell, '%d_%d'%(left, right), ncell)
+    if h is None:
+        h = np.zeros(npoints, np.float32)
+    for key in dict_edge_cell:
+        if len(dict_edge_cell[key]) != 2:
+            print(key, dict_edge_cell[key])
+            continue
+        id1, id2 = dict_edge_cell[key]
+        spl = key.split('_')
+        left = int(spl[0])
+        right = int(spl[1])
+        id1_l = dist2(points[id1], dps[left]) - h[id1]
+        id1_r = dist2(points[id1], dps[right]) - h[id1]
+        id2_l = dist2(points[id2], dps[left]) - h[id2]
+        id2_r = dist2(points[id2], dps[right]) - h[id2]
+        diff_l = id1_l - id2_l
+        diff_r = id1_r - id2_r
+        flag = 0
+        if np.abs(diff_l) > thresh or np.abs(diff_r) > thresh:
+            flag = 1
+        print(flag, key, dict_edge_cell[key], diff_l, diff_r)
+
+if __name__ == '__main__':
+    points = np.random.rand(50, 2) * 2
+    h = (np.random.rand(points.shape[0], 1) * 2 - 1) * 0.3
+    dps, dps_bd, cells_dic, faces_pd, points_bd = power_diagram_2d(points, h)
+    _dps = np.concatenate((dps, dps_bd), axis = 0)
+    verify(points, _dps, cells_dic, h)
+    scale = 4
+    fig2d = plt.figure(figsize = (12 * scale, 11 * scale))
+    ax2d = fig2d.add_subplot(111)
+    plot_delaunay(faces_pd, points, ax2d)
+    ax2d.plot(dps[:, 0], dps[:, 1], 'b*')
+    for cnt in range(dps.shape[0]):
+        ax2d.text(dps[cnt, 0], dps[cnt, 1], str(cnt), color = 'b')
+    ax2d.plot(dps_bd[:, 0], dps_bd[:, 1], 'gx')
+    plot_pd_self(_dps, cells_dic, ax2d)
+    for cnt in range(dps_bd.shape[0]):
+        ax2d.text(dps_bd[cnt, 0], dps_bd[cnt, 1], str(cnt + dps.shape[0]), color = 'c')
+    ax2d.plot(points_bd[:, 0], points_bd[:, 1], 'c')
+    plt.show()
