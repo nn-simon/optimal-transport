@@ -1,4 +1,3 @@
-# %load /home/simon/omt-gu/omt-py/optimal-transport/power_diagram.py
 import scipy as sci
 from scipy.spatial import ConvexHull as convexhull
 from scipy.spatial import Delaunay as delaunay
