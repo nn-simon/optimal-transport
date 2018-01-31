@@ -1,4 +1,5 @@
 import scipy as sci
+import numpy as np
 from scipy.spatial import ConvexHull as convexhull
 from scipy.spatial import Delaunay as delaunay
 import numpy as np
@@ -15,8 +16,6 @@ def intersect_ray_polygon(ray, poly, scale, thresh = 0.001):
     c = [b[0] + thresh, b[1] + thresh]
     tri = polygon(np.array([a, b, c]))
     region = poly & tri
-    #print region.area()
-    #print region
     npoints = region.nPoints()
     if npoints == 0:
         return []
@@ -112,15 +111,22 @@ def compute_cell(_face, pos, faces, edges_dic, cell):
         
     return flag_bd
 
-def power_diagram_2d(points, h = None):
+def power_diagram_2d(points, polygon_bd, scale, h = None, dh = None, c = 0.01):
     npoints = points.shape[0]
     if h is None:
         h = np.zeros((points.shape[0], 1), np.float32)
+    if dh is None:
+        dh = np.zeros((points.shape[0], 1), np.float32)
     tp = np.sum(points * points, axis=1, keepdims=True)
-    pl = np.concatenate((points, tp - h), axis = 1)
-    hull = convexhull(pl)
-    ind = hull.equations[:, 2] < 0
-    nfaces = np.sum(ind)
+    nfaces = 0
+    pl = np.concatenate((points, tp), axis = 1)
+    while nfaces < npoints:
+        hh = h - c * dh
+        pl[:, 2] = tp[:, 0] - hh[:, 0]
+        hull = convexhull(pl)
+        ind = hull.equations[:, 2] < 0
+        nfaces = np.sum(ind)
+        c *= 0.5
     faces = hull.simplices[ind]
     dps = np.zeros((nfaces, 2), np.float32)
     dict_id_edge = dict()  # build a map dict in wich the key is edge and the value is the id of faces
@@ -135,7 +141,6 @@ def power_diagram_2d(points, h = None):
 
     cells_dic = dict()
     flag_bd = np.zeros((npoints), np.int32)
-    plot_delaunay(faces, points, ax2d)
     for cnt, _face in enumerate(faces):
         for pos in range(3):
             if _face[pos] in cells_dic:
@@ -144,13 +149,8 @@ def power_diagram_2d(points, h = None):
             flag_bd[_face[pos]] = compute_cell(_face, pos, faces, dict_id_edge, cell)
             cells_dic.update({_face[pos]: cell})
 
-    # construct a boundry
+    # construct boundry
     dps_bd = np.zeros((np.sum(flag_bd), 2), np.float32)
-    minxy = np.min(dps, axis = 0) - 1.0
-    maxxy = np.max(dps, axis = 0) + 1.0
-    scale = np.sqrt(np.sum((maxxy - minxy)**2))
-    points_bd = np.array([[minxy[0], minxy[1]], [minxy[0], maxxy[1]], [maxxy[0], maxxy[1]], [maxxy[0], minxy[1]], [minxy[0], minxy[1]]])
-    polygon_bd = polygon(points_bd)
     
     cnt = 0
     for ii in range(npoints):
@@ -197,11 +197,12 @@ def power_diagram_2d(points, h = None):
         ray = np.array([dps[face_num, 0], dps[face_num, 1], -vec[1], vec[0]])
         point_inter = intersect_ray_polygon(ray, polygon_bd, scale)
         if point_inter == []:
-            print('intersect_ray_polygon error!')
-            exit()
-        dps_bd[cnt] = np.array(point_inter)
+            #print('intersect_ray_polygon error!')
+            dps_bd[cnt] = dps[face_num]
+        else:
+            dps_bd[cnt] = np.array(point_inter)
         cnt += 1
-    return dps, dps_bd, cells_dic, faces, points_bd
+    return dps, dps_bd, cells_dic, faces, hh
 
 def verify(points, dps, cells_dic, h = None, thresh = 0.0001):
     dist2 = lambda x, y: np.sum((x - y)**2)
@@ -214,7 +215,7 @@ def verify(points, dps, cells_dic, h = None, thresh = 0.0001):
                 left, right = _cmp(cell[idx], cell[idx+1])
                 _dict_update(dict_edge_cell, '%d_%d'%(left, right), ncell)
     if h is None:
-        h = np.zeros(npoints, np.float32)
+        h = np.zeros((npoints,1), np.float32)
     for key in dict_edge_cell:
         if len(dict_edge_cell[key]) != 2:
             print(key, dict_edge_cell[key])
@@ -235,11 +236,18 @@ def verify(points, dps, cells_dic, h = None, thresh = 0.0001):
         print(flag, key, dict_edge_cell[key], diff_l, diff_r)
 
 if __name__ == '__main__':
-    points = np.random.rand(50, 2) * 2
-    h = (np.random.rand(points.shape[0], 1) * 2 - 1) * 0.3
-    dps, dps_bd, cells_dic, faces_pd, points_bd = power_diagram_2d(points, h)
+    minxy = np.array([-2.0, -2.0])
+    maxxy = np.array([2.0, 2.0])
+    scale = np.sqrt(np.sum((maxxy - minxy)**2))
+    points_bd = np.array([[minxy[0], minxy[1]], [minxy[0], maxxy[1]], [maxxy[0], maxxy[1]], [maxxy[0], minxy[1]], [minxy[0], minxy[1]]])
+    polygon_bd = polygon(points_bd)
+    points = np.random.random((50, 2))
+    #print(points)
+    h = None
+    dh = (np.random.rand(points.shape[0], 1) * 2 - 1) * 0.1
+    dps, dps_bd, cells_dic, faces_pd, new_h = power_diagram_2d(points, polygon_bd, scale, h, dh)
     _dps = np.concatenate((dps, dps_bd), axis = 0)
-    verify(points, _dps, cells_dic, h)
+    verify(points, _dps, cells_dic, new_h)
     scale = 4
     fig2d = plt.figure(figsize = (12 * scale, 11 * scale))
     ax2d = fig2d.add_subplot(111)
